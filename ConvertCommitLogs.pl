@@ -39,7 +39,7 @@ sub main {
 
    $sql = "select id, date_format(date_added, \"%Y-%m-%d %H:%i:%S\") date_added, commit_date, committer, update_description \
              from change_log\
-            order by id limit 10";
+            order by id";
 
    print "sql is $sql\n";
 
@@ -56,7 +56,7 @@ sub main {
       print $row->{"id"} . " " . $row->{"date_added"} . "\n";
       my $commit_id = AddCommit($row, $dbh_pg);
 
-#      TransferWatchLists($id, $user_id, $dbh_mysql, $dbh_pg);
+      TransferChangeLogPort($id, $commit_id, $dbh_mysql, $dbh_pg);
 
       $num_commits++;
    }
@@ -92,78 +92,52 @@ sub AddCommit($;$) {
            die "Could not execute SQL $sql ... maybe invalid?";
 
    $sth->finish();
+
+   return $id;
 }
 
-sub TransferWatchLists($;$;$;$) {
-   my $user_id_mysql = shift;
-   my $user_id_pg    = shift;
-   my $dbh_mysql     = shift;
-   my $dbh_pg        = shift;
+sub TransferChangeLogPort($;$;$;$) {
+   my $change_log_id_mysql = shift;
+   my $commit_log_id_pg    = shift;
+   my $dbh_mysql           = shift;
+   my $dbh_pg              = shift;
 
    my $sth;
    my $sql;
-   my $row;    
-   $sql = "select id, name from watch where owner_user_id = $user_id_mysql";
-   print "TransferWatchLists sql = $sql\n";
+   my $row;
+
+   $sql = "select id, port_id from change_log_port where change_log_id = $change_log_id_mysql";
+   print "TransferChangeLogPort sql = $sql\n";
    
    $sth = $dbh_mysql->prepare($sql);
    $sth->execute ||
            die "Could not execute SQL $sql ... maybe invalid?";
 
-   my $num_watch_lists = 0;
    while ($row = $sth->fetchrow_hashref()) {
-      my $watch_list_id_mysql = $row->{"id"};
-      my $name                = $row->{"name"};
+      my $change_log_port_id = $row->{id}; 
+      my $port_id_mysql      = $row->{port_id};
 
-      print "watch list " . $row->{"id"} . " " . $row->{"name"} . "\n";
+      print "port_id " . $row->{"port_id"} . "\n";
 
-      my $watch_list_id_pg = GetWatchListId($user_id_pg, $name, $dbh_pg);
-      if (!defined($watch_list_id_pg)) {
-         $watch_list_id_pg = CreateWatchList($user_id_pg, $name, $dbh_pg);
-      }
-
-      TransferWatchListItems($watch_list_id_mysql, $watch_list_id_pg, $dbh_mysql, $dbh_pg);
-      $num_watch_lists++;
+      TransferChangeLogDetails($commit_log_id_pg, $port_id_mysql, $change_log_port_id, $dbh_mysql, $dbh_pg);
    }
 
    $sth->finish();
 }
 
-sub GetWatchListId($;$;$) {
-   my $user_id_pg = shift;
-   my $name       = shift;
-   my $dbh_pg     = shift;
+sub TransferChangeLogDetails($;$;$;$;$) {
+   my $commit_log_id_pg   = shift;
+   my $port_id_mysql       = shift;
+   my $change_log_port_id = shift;
+   my $dbh_mysql          = shift;
+   my $dbh_pg             = shift;
 
-   my $sth;
-   my $sql;
-   my @row;
-    
-   my $lowername = $dbh_pg->quote($name);
-   $sql = "select id from watch_list where user_id = $user_id_pg and lower(name) = $lowername";
-   print "GetWatchListId sql = $sql\n";
-      
-   $sth = $dbh_pg->prepare($sql);
-   $sth->execute ||
-           die "Could not execute SQL $sql ... maybe invalid?";
-   
-   @row = $sth->fetchrow_array();
-    
-   $sth->finish();
-   
-   return $row[0];
-}
-
-sub TransferWatchListItems($;$;$) {
-   my $watch_list_id_mysql = shift;
-   my $watch_list_id_pg    = shift;
-   my $dbh_mysql           = shift;
-   my $dbh_pg              = shift;
    my $sth;      
    my $sql;
    my $row;
 
-   $sql = "select port_id from watch_port where watch_id = $watch_list_id_mysql";
-   print "TransferWatchListItems sql = $sql\n";
+   $sql = "select change_type, details from change_log_details where change_log_port_id = $change_log_port_id";
+   print "TransferChangeLogDetails sql = $sql\n";
 
    $sth = $dbh_mysql->prepare($sql);
 
@@ -172,13 +146,16 @@ sub TransferWatchListItems($;$;$) {
 
    my $num_watch_list_items = 0;
    while ($row=$sth->fetchrow_hashref()) {   
-      my $port_id_mysql = $row->{"port_id"};
+      my $change_type   = $row->{change_type};
+      my $details       = $row->{details};
 
-      print "watch list item $port_id_mysql\n";
+      my $element_revision_id = GetElementRevisionID($port_id_mysql, $details, $dbh_mysql, $dbh_pg);
 
-      my $port_element_id = GetPortElementId($port_id_mysql, $dbh_mysql, $dbh_pg);
-
-      AddToWatchList($watch_list_id_pg, $port_element_id, $dbh_pg);
+      if (defined($element_revision_id)) {
+         AddToCommitLogElement($commit_log_id_pg, $element_revision_id, $change_type, $dbh_pg);
+      } else {
+         print " could not find $details in this port\n";
+      }
 
       $num_watch_list_items++;
    }
@@ -186,23 +163,84 @@ sub TransferWatchListItems($;$;$) {
    $sth->finish();
 }
 
-sub AddToWatchList($;$) {
-   my $watch_list_id_pg = shift;  
-   my $port_element_id  = shift;
-   my $dbh              = shift;
+sub GetElementRevisionID {
+   my $port_id_mysql = shift;
+   my $details       = shift;
+   my $dbh_mysql     = shift;
+   my $dbh_pg        = shift;
+
+   my $category_id = GetPortCategory($port_id_mysql, $dbh_mysql);
+
+   if (!defined($category_id)) {
+      die "GetElementRevisionID failed to find a category for port $port_id_mysql\n";
+   }   
+
+   my $portname = GetPortName($port_id_mysql, $dbh_mysql);
+
+   if (!defined($portname)) {
+      die "GetElementRevisionID failed to find a name for port $port_id_mysql\n";
+   }
+
+   my $category_name = GetCategoryName($category_id, $dbh_mysql);
+   if (!defined($category_name)) {
+      die "GetElementRevisionID failed to find a name for category $category_id\n";
+   }
+
+   my $element_pathname = "ports/$category_name/$portname/$details";
+   
+   my $element_id = GetIDFromPath($element_pathname, $dbh_pg);
+
+   my $element_revision_id;
+   if (defined($element_id)) {
+      $element_revision_id = GetRevisionId($element_id, "HEAD", $dbh_pg);
+   }
+
+   return $element_revision_id;
+}
+
+sub AddToCommitLogElement($;$;$;$) {
+   my $commit_log_id_pg    = shift;  
+   my $element_revision_id = shift;
+   my $change_type         = shift;
+   my $dbh                 = shift;
+
    my $sth;
    my $sql;
+
+   print "change_type = $change_type\n";
+   $change_type = ConvertChangeType($change_type);
+   print "change_type = $change_type\n";
+
+   my $change_type_quoted = $dbh->quote($change_type);
    
-   $sql = "insert into watch_list_element (watch_list_id, element_id) values ($watch_list_id_pg, $port_element_id)";
-   print "AddToWatchList sql = $sql\n";
+   my $id = GetNextValue($commit_log_elements_id_seq, $dbh);
+
+   $sql = "insert into commit_log_elements (id, commit_log_id, element_revision_id, change_type) 
+                                values ($id, $commit_log_id_pg, $element_revision_id, $change_type_quoted)";
+
+   print "AddToCommitLogElement sql = $sql\n";
     
    $sth = $dbh->prepare($sql);
    $sth->execute ||
            die "Could not execute SQL $sql ... maybe invalid?";
-           
+
    $sth->finish();
 }
 
+sub ConvertChangeType($) {
+   my $change_type = shift;
+
+   print "change_type = $change_type\n";
+
+   if ($change_type == 'I') {
+      print "*** converted change_type $change_type\n";
+      $change_type = 'A';  # for a while, we had I for import.  but we use "A" now.
+   }
+
+   print "change_type = $change_type\n";
+
+   return $change_type;
+}
 
 sub GetPortElementId($;$;$) {
    my $port_id_mysql = shift;
@@ -227,13 +265,11 @@ sub GetPortElementId($;$;$) {
    }
 
    my $port_element_id = GetIDFromPath("ports/$category_name/$portname", $dbh_pg);
-
    if (!defined($port_element_id)) {
       die "GetPortElementId failed to find an element id for ports/$category_name/$portname\n";
    }
 
    return $port_element_id;
-
 }
 
 sub GetPortCategory($;$) {
@@ -388,5 +424,28 @@ sub GetIDFromPath($;$) {
    
    $sth->finish();
    
+   return $row[0];
+}
+
+sub GetRevisionId($;$;$) {
+   my $element_id = shift;
+   my $tag       = shift;
+   my $dbh       = shift;
+   my $sth;
+   my $sql;
+   my @row;       
+   
+   $sql = "select ElementRevisionID($element_id, '$tag')";
+ 
+   print "sql is $sql\n";
+
+   $sth = $dbh->prepare($sql);
+   $sth->execute ||
+           die "Could not execute SQL $sql ... maybe invalid?";
+      
+   @row = $sth->fetchrow_array();
+      
+   $sth->finish();
+ 
    return $row[0];
 }

@@ -38,8 +38,8 @@ sub main {
    print "connected\n";
 
    $sql = "select id, username, password, cookie, firstlogin, lastlogin, email, watchnotifyfrequency, \
-                  emailsitenotices_yn, emailbouncecount, type
-             from users
+                  emailsitenotices_yn, emailbouncecount, type \
+             from users \
             order by id";
 
    print "sql is $sql\n";
