@@ -1,0 +1,6 @@
+INSERT INTO watch_notice (id, frequency, description) 
+                         values ( '1', 'Z', 'Don\'t notify me');
+INSERT INTO watch_notice VALUES ( '2', 'D', 'Day', '2000-12-17 13:19:14');
+INSERT INTO watch_notice VALUES ( '3', 'W', 'Week (on Tuesdays)', '2000-12-12 19:00:21');
+INSERT INTO watch_notice VALUES ( '4', 'F', 'Fortnightly  (9th and 23rd)', '2000-12-17 13:19:37');
+INSERT INTO watch_notice VALUES ( '5', 'M', 'Month (23rd)', '2000-11-23 19:43:52');

@@ -37,6 +37,8 @@ sub main {
 
    print "connected\n";
 
+   my %Notices = GetFrequencies($dbh_pg);
+
    $sql = "select id, username, password, cookie, firstlogin, lastlogin, email, watchnotifyfrequency, \
                   emailsitenotices_yn, emailbouncecount, type \
              from users \
@@ -53,9 +55,19 @@ sub main {
       my $id   = $row->{"id"};
       my $name = $row->{"username"};
 
+      #
+      # convert the frequency
+      #
+      print "before $row->{watchnotifyfrequency}\n";
+      print "to become $Notices{$row->{watchnotifyfrequency}}\n";
+      $row->{watchnotifyfrequency} = $Notices{$row->{watchnotifyfrequency}};
+      print "after $row->{watchnotifyfrequency}\n";
+
 
       print $row->{"id"} . " " . $row->{"username"} . "\n";
       my $user_id = UpdateUser($row, $dbh_pg);
+
+      print "PG user id = $user_id\n";
 
       TransferWatchLists($id, $user_id, $dbh_mysql, $dbh_pg);
 
@@ -87,7 +99,7 @@ sub UpdateUser($;$) {
    my $firstlogin           = $dbh->quote(ConvertNullToString($row->{firstlogin}));
    my $lastlogin            = $dbh->quote(ConvertNullToString($row->{lastlogin}));
    my $email                = $dbh->quote(ConvertNullToString($row->{email}));
-   my $watchnotifyfrequency = $dbh->quote($row->{watchnotifyfrequency});
+   my $watch_notice_id      = $row->{watchnotifyfrequency};
    my $emailsitenotices_yn  = $dbh->quote($row->{emailsitenotices_yn});
    my $emailbouncecount     = $dbh->quote(ConvertNullToString($row->{emailbouncecount}));
    my $type                 = $dbh->quote($row->{type});
@@ -96,18 +108,18 @@ sub UpdateUser($;$) {
    my $user_id = GetUser($row->{username}, $dbh);
 
    if (!defined($user_id)) {
-      my $user_id = GetNextValue($user_id_seq, $dbh);
+      $user_id = GetNextValue($user_id_seq, $dbh);
    
-      $sql = "   INSERT INTO users (id, name, password, cookie, firstlogin, lastlogin, email, watchnotifyfrequency, \
+      $sql = "   INSERT INTO users (id, name, password, cookie, firstlogin, lastlogin, email, watch_notice_id, \
                                     emailsitenotices_yn, emailbouncecount, type)
                             values ($user_id, $name, $password, $cookie, $firstlogin, $lastlogin, $email, \
-                                    $watchnotifyfrequency, $emailsitenotices_yn, $emailbouncecount, $type)";
+                                    $watch_notice_id, $emailsitenotices_yn, $emailbouncecount, $type)";
    } else {
       $sql = " UPDATE users set \
                       name                 = $name,                 password                = $password,  \
                       cookie               = $cookie,               firstlogin              = $firstlogin,   \
                       lastlogin            = $lastlogin,            email                   = $email,  \
-                      watchnotifyfrequency = $watchnotifyfrequency, emailsitenotices_yn     = $emailsitenotices_yn, \
+                      watch_notice_id      = $watch_notice_id,      emailsitenotices_yn     = $emailsitenotices_yn, \
                       emailbouncecount     = $emailbouncecount,     type                    = $type
                 WHERE ID = $user_id";
    }
@@ -443,4 +455,31 @@ sub GetIDFromPath($;$) {
    $sth->finish();
    
    return $row[0];
+}
+
+sub GetFrequencies($) {
+   my $dbh_pg = shift;
+   my $sql;
+   my $sth;
+   my $row;
+   my %Notices;
+
+   $sql = "select *
+            from watch_notice \
+            limit 10";
+
+   print "sql is $sql\n";
+
+   $sth = $dbh_pg->prepare($sql);
+   $sth->execute ||
+           die "Could not execute SQL $sql ... maybe invalid?";
+
+   while ($row=$sth->fetchrow_hashref()) {
+      print $row->{"id"} . " " . $row->{"frequency"} . " " .  $row->{"description"} . "\n";
+
+      $Notices{$row->{"frequency"}} = $row->{"id"};
+      print $Notices{$row->{"frequency"}} . "\n";
+   }
+
+   return %Notices;
 }
