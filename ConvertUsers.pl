@@ -40,7 +40,7 @@ sub main {
    $sql = "select id, username, password, cookie, firstlogin, lastlogin, email, watchnotifyfrequency, \
                   emailsitenotices_yn, emailbouncecount, type
              from users
-            order by id limit 1";
+            order by id";
 
    print "sql is $sql\n";
 
